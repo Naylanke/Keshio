@@ -6,13 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [TransactionEntity::class, UserSettingsEntity::class],
-    version = 3,
+    entities = [TransactionEntity::class, UserSettingsEntity::class, SavingsGoalEntity::class],
+    version = 5,
     exportSchema = false
 )
 abstract class KeshioDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun userSettingsDao(): UserSettingsDao
+    abstract fun savingsGoalDao(): SavingsGoalDao
 
     companion object {
         @Volatile

@@ -33,6 +33,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,11 +60,13 @@ fun HomeScreen(
     onEditTransactionClick: (TransactionEntity) -> Unit,
     onDeleteTransactionClick: (TransactionEntity) -> Unit,
     onNavigateToTransactions: () -> Unit,
+    onNavigateToGoals: () -> Unit = {},
     onUpdateSmsTracking: (Boolean) -> Unit = {},
     onOpenSmsSimulator: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val currency = uiState.userSettings.currencySymbol
+    var isCanISpendThisOpen by remember { mutableStateOf(false) }
 
     val now = System.currentTimeMillis()
     val cal = Calendar.getInstance().apply {
@@ -97,6 +103,28 @@ fun HomeScreen(
                     status = uiState.dailyBudgetStatus,
                     currencySymbol = currency
                 )
+            }
+        }
+
+        // "Can I Spend This?" Prominent Tool Card
+        item {
+            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                com.example.ui.components.CanISpendThisCard(
+                    onOpenTool = { isCanISpendThisOpen = true }
+                )
+            }
+        }
+
+        // Small Goals Glance Section
+        if (uiState.goals.isNotEmpty()) {
+            item {
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    com.example.ui.components.HomeGoalsGlanceCard(
+                        goals = uiState.goals,
+                        currencySymbol = currency,
+                        onNavigateToGoals = onNavigateToGoals
+                    )
+                }
             }
         }
 
@@ -436,5 +464,15 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (isCanISpendThisOpen) {
+        com.example.ui.components.CanISpendThisBottomSheet(
+            todaySpent = uiState.todaySpent,
+            dailyTarget = uiState.dailyTarget,
+            currencySymbol = currency,
+            activeGoals = uiState.goals.filter { !it.isCompleted },
+            onDismiss = { isCanISpendThisOpen = false }
+        )
     }
 }

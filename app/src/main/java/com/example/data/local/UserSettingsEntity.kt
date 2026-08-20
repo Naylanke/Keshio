@@ -22,7 +22,15 @@ data class UserSettingsEntity(
     val notificationCooldownMinutes: Int = 30, // Minimum delay between alerts (plus 1/day limit for exceeded)
     val lastApproachingAlertDate: String = "", // e.g. "2026-08-20"
     val lastExceededAlertDate: String = "", // e.g. "2026-08-20"
-    val lastSummaryDate: String = "" // e.g. "2026-08-20"
+    val lastSummaryDate: String = "", // e.g. "2026-08-20"
+
+    // Phase 7: App Lock, Privacy & Onboarding Settings
+    val detailedNotificationsEnabled: Boolean = false, // false = "New transaction detected", true = full amounts
+    val isAppLockEnabled: Boolean = false,
+    val appLockType: String = "NONE", // "NONE", "PIN", "BIOMETRIC"
+    val pinHash: String = "", // SHA-256 hashed PIN
+    val appLockTiming: String = "FOREGROUND", // "IMMEDIATE", "ONE_MIN", "FIVE_MIN", "FOREGROUND"
+    val onboardingCompleted: Boolean = false
 )
 
 

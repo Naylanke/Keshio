@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Paid
@@ -38,6 +41,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,18 +75,28 @@ fun SettingsScreen(
     onUpdateThemeMode: (String) -> Unit,
     onUpdateSmsTracking: (Boolean) -> Unit,
     onUpdateTestMode: (Boolean) -> Unit,
+    onUpdateBudgetWarnings: (Boolean) -> Unit,
+    onUpdateTransactionNotifications: (Boolean) -> Unit,
+    onUpdateEndOfDaySummary: (Boolean) -> Unit,
     onOpenSmsSimulator: () -> Unit,
     onRestoreSampleData: () -> Unit,
     onClearAllData: () -> Unit,
+    onDeleteAllKeshioData: () -> Unit = onClearAllData,
+    onUpdateDetailedNotifications: (Boolean) -> Unit = {},
+    onUpdateAppLock: (enabled: Boolean, lockType: String, pin: String, timing: String) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val currency = uiState.userSettings.currencySymbol
 
     var showDailyTargetDialog by remember { mutableStateOf(false) }
     var showMonthlyTargetDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showClearDataDialog by remember { mutableStateOf(false) }
+    var showDeleteAllKeshioDialog by remember { mutableStateOf(false) }
     var showRestoreSampleDialog by remember { mutableStateOf(false) }
+    var showAppLockDialog by remember { mutableStateOf(false) }
+    var showSetPinDialog by remember { mutableStateOf(false) }
 
     // Dialog for Daily Spending Target
     if (showDailyTargetDialog) {
@@ -229,25 +245,38 @@ fun SettingsScreen(
         )
     }
 
-    // Clear Data Confirmation Dialog
-    if (showClearDataDialog) {
+    // Delete All Keshio Data Confirmation Dialog
+    if (showDeleteAllKeshioDialog) {
         AlertDialog(
-            onDismissRequest = { showClearDataDialog = false },
-            title = { Text("Clear All Transactions?") },
-            text = { Text("This will permanently delete all transaction records from your device. Budget settings will be preserved.") },
+            onDismissRequest = { showDeleteAllKeshioDialog = false },
+            title = { Text("Delete All Keshio Data?") },
+            text = {
+                Column {
+                    Text(
+                        "This will permanently delete your transactions, budgets, insights, goals and settings from this device.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Keshio will return to a clean initial state. Real SMS messages on your phone will NOT be deleted.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onClearAllData()
-                        showClearDataDialog = false
+                        onDeleteAllKeshioData()
+                        showDeleteAllKeshioDialog = false
                     },
-                    modifier = Modifier.testTag("confirm_clear_all_data_btn")
+                    modifier = Modifier.testTag("confirm_delete_all_keshio_data_btn")
                 ) {
-                    Text("Clear All", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    Text("Delete All Data", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDataDialog = false }) {
+                TextButton(onClick = { showDeleteAllKeshioDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -273,6 +302,168 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showRestoreSampleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // App Lock Security Configuration Dialog
+    if (showAppLockDialog) {
+        val isBiometricSupported = remember(context) { com.example.security.SecurityUtils.canAuthenticateWithBiometrics(context) }
+        var tempEnabled by remember { mutableStateOf(uiState.userSettings.isAppLockEnabled) }
+        var tempType by remember { mutableStateOf(if (uiState.userSettings.appLockType == "NONE") "PIN" else uiState.userSettings.appLockType) }
+        var tempTiming by remember { mutableStateOf(uiState.userSettings.appLockTiming) }
+
+        AlertDialog(
+            onDismissRequest = { showAppLockDialog = false },
+            title = { Text("App Lock Security Settings") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Enable App Lock", fontWeight = FontWeight.Bold)
+                        Switch(
+                            checked = tempEnabled,
+                            onCheckedChange = { tempEnabled = it },
+                            modifier = Modifier.testTag("app_lock_enable_switch")
+                        )
+                    }
+
+                    if (tempEnabled) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Lock Method:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = tempType == "PIN",
+                                onClick = { tempType = "PIN" },
+                                modifier = Modifier.testTag("app_lock_type_pin")
+                            )
+                            Text("PIN Code", modifier = Modifier.clickable { tempType = "PIN" })
+                        }
+
+                        if (isBiometricSupported) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = tempType == "BIOMETRIC",
+                                    onClick = { tempType = "BIOMETRIC" },
+                                    modifier = Modifier.testTag("app_lock_type_biometric")
+                                )
+                                Text("Biometrics / Fingerprint", modifier = Modifier.clickable { tempType = "BIOMETRIC" })
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Lock Timing:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        val timings = listOf(
+                            "IMMEDIATE" to "Immediately",
+                            "FOREGROUND" to "When leaving foreground (Default)",
+                            "ONE_MIN" to "After 1 minute in background",
+                            "FIVE_MIN" to "After 5 minutes in background"
+                        )
+
+                        timings.forEach { (key, label) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = tempTiming == key,
+                                    onClick = { tempTiming = key },
+                                    modifier = Modifier.testTag("app_lock_timing_$key")
+                                )
+                                Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.clickable { tempTiming = key })
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (tempEnabled && tempType == "PIN" && uiState.userSettings.pinHash.isBlank()) {
+                            showAppLockDialog = false
+                            showSetPinDialog = true
+                        } else {
+                            onUpdateAppLock(tempEnabled, if (tempEnabled) tempType else "NONE", "", tempTiming)
+                            showAppLockDialog = false
+                        }
+                    },
+                    modifier = Modifier.testTag("save_app_lock_settings_btn")
+                ) {
+                    Text("Save", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAppLockDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Set PIN Dialog
+    if (showSetPinDialog) {
+        var newPin by remember { mutableStateOf("") }
+        var confirmPin by remember { mutableStateOf("") }
+        var pinError by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showSetPinDialog = false },
+            title = { Text("Set 4-Digit Secret PIN") },
+            text = {
+                Column {
+                    Text("Enter a 4 to 6 digit secret PIN to protect Keshio.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newPin,
+                        onValueChange = { if (it.length <= 6) newPin = it.filter { c -> c.isDigit() } },
+                        label = { Text("New PIN") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("new_pin_input")
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = confirmPin,
+                        onValueChange = { if (it.length <= 6) confirmPin = it.filter { c -> c.isDigit() } },
+                        label = { Text("Confirm PIN") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("confirm_pin_input")
+                    )
+
+                    if (pinError != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(pinError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newPin.length < 4) {
+                            pinError = "PIN must be at least 4 digits"
+                        } else if (newPin != confirmPin) {
+                            pinError = "PINs do not match"
+                        } else {
+                            onUpdateAppLock(true, "PIN", newPin, uiState.userSettings.appLockTiming)
+                            showSetPinDialog = false
+                        }
+                    },
+                    modifier = Modifier.testTag("confirm_set_pin_btn")
+                ) {
+                    Text("Set PIN", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSetPinDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -305,6 +496,93 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+
+        // Security & App Lock Section
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+            SectionHeader(title = "Security & App Protection")
+        }
+
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    SettingItem(
+                        icon = Icons.Default.Lock,
+                        title = "App Lock Protection",
+                        subtitle = if (uiState.userSettings.isAppLockEnabled) "Enabled (${uiState.userSettings.appLockType})" else "Disabled",
+                        onClick = { showAppLockDialog = true },
+                        testTag = "setting_app_lock"
+                    )
+
+                    if (uiState.userSettings.isAppLockEnabled && uiState.userSettings.appLockType == "PIN") {
+                        SettingDivider()
+                        SettingItem(
+                            icon = Icons.Default.Key,
+                            title = "Change Secret PIN",
+                            subtitle = "Update your 4-digit access code",
+                            onClick = { showSetPinDialog = true },
+                            testTag = "setting_change_pin"
+                        )
+                    }
+                }
+            }
+        }
+
+        // Notifications & Alerts Section
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+            SectionHeader(title = "Notifications & Privacy")
+        }
+
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    SettingToggleItem(
+                        title = "Budget Warnings",
+                        subtitle = "Alerts when approaching or exceeding daily target",
+                        checked = uiState.userSettings.budgetWarningsEnabled,
+                        onCheckedChange = { onUpdateBudgetWarnings(it) }
+                    )
+                    SettingDivider()
+                    SettingToggleItem(
+                        title = "Transaction Notifications",
+                        subtitle = "Alerts when a new financial transaction is detected",
+                        checked = uiState.userSettings.transactionNotificationsEnabled,
+                        onCheckedChange = { onUpdateTransactionNotifications(it) }
+                    )
+                    SettingDivider()
+                    SettingToggleItem(
+                        title = "Hide Financial Info on Lock Screen",
+                        subtitle = "Mask transaction amounts and merchant names in notifications",
+                        checked = !uiState.userSettings.detailedNotificationsEnabled,
+                        onCheckedChange = { onUpdateDetailedNotifications(!it) }
+                    )
+                    SettingDivider()
+                    SettingToggleItem(
+                        title = "End-of-Day Summary",
+                        subtitle = "Recap of today's spending and remaining budget",
+                        checked = uiState.userSettings.endOfDaySummaryEnabled,
+                        onCheckedChange = { onUpdateEndOfDaySummary(it) }
+                    )
+                }
             }
         }
 
@@ -424,10 +702,10 @@ fun SettingsScreen(
             }
         }
 
-        // Privacy & Offline Storage Section
+        // Privacy & Local Data Section
         item {
             Spacer(modifier = Modifier.height(12.dp))
-            SectionHeader(title = "Privacy & Local Data")
+            SectionHeader(title = "Privacy Center & Local Data Policy")
         }
 
         item {
@@ -440,11 +718,12 @@ fun SettingsScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    // Header Status
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
                                 .background(StatusGreen.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
@@ -459,19 +738,56 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Zero Cloud Sync Guarantee",
+                                text = "Privacy-First Architecture",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
+                                    fontSize = 16.sp
                                 ),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "All transactions and budget limits are stored 100% locally on your device in a secure SQLite database.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "SMS Monitoring: ${if (uiState.userSettings.smsTrackingEnabled) "Active" else "Paused"}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (uiState.userSettings.smsTrackingEnabled) StatusGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // What Keshio Stores
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "What Keshio stores (Local SQLite):",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Parsed transaction amounts, dates, type & party names\n• Daily and monthly budget target limits\n• Savings goals & custom progress logs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "What Keshio NEVER accesses or stores:",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = StatusGreen
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Contacts, phone calls, camera, microphone or location\n• Non-financial SMS messages, bank PINs or passwords\n• No server sync — 100% of your data stays on this phone",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -488,11 +804,22 @@ fun SettingsScreen(
 
                     SettingItem(
                         icon = Icons.Default.DeleteSweep,
-                        title = "Clear All Transactions",
-                        subtitle = "Erase all transaction records permanently",
+                        title = "Clear Transactions Only",
+                        subtitle = "Erase transaction records while keeping budgets & goals",
                         onClick = { showClearDataDialog = true },
                         iconTint = MaterialTheme.colorScheme.error,
                         testTag = "setting_clear_all_data"
+                    )
+
+                    SettingDivider()
+
+                    SettingItem(
+                        icon = Icons.Default.DeleteSweep,
+                        title = "Delete All Keshio Data",
+                        subtitle = "Wipe all transactions, goals, budgets & reset app completely",
+                        onClick = { showDeleteAllKeshioDialog = true },
+                        iconTint = MaterialTheme.colorScheme.error,
+                        testTag = "setting_delete_all_keshio_data"
                     )
                 }
             }
@@ -697,6 +1024,42 @@ private fun ThemeOptionItem(
                     .background(MaterialTheme.colorScheme.primary)
             )
         }
+    }
+}
+
+@Composable
+private fun SettingToggleItem(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
 

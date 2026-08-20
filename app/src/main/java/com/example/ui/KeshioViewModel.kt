@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.KeshioDatabase
+import com.example.data.local.SavingsGoalEntity
 import com.example.data.local.TransactionEntity
 import com.example.data.local.UserSettingsEntity
 import com.example.data.model.BudgetStatus
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
+
+import com.example.ui.insights.InsightsData
+import com.example.ui.insights.InsightsEngine
 
 data class CategorySpend(
     val category: String,
@@ -52,11 +56,38 @@ data class KeshioUiState(
     
     // Insights
     val categoryBreakdown: List<CategorySpend> = emptyList(),
+    val insightsData: InsightsData = InsightsData(
+        hasEnoughData = false,
+        totalTransactionsCount = 0,
+        currentPeriodLabel = "This Week",
+        totalSpentCurrentPeriod = 0.0,
+        totalReceivedCurrentPeriod = 0.0,
+        totalSpentPreviousPeriod = 0.0,
+        periodDifference = 0.0,
+        periodPercentageChange = 0.0,
+        hasPreviousPeriodData = false,
+        averageDailySpending = 0.0,
+        topCategoryName = null,
+        topCategoryAmount = 0.0,
+        weeklySummary = com.example.ui.insights.PeriodSummary("This Week", 0.0, 0.0, 0.0, 0.0, 0.0, "None", "🟢 Within target", true),
+        monthlySummary = com.example.ui.insights.PeriodSummary("This Month", 0.0, 0.0, 0.0, 0.0, 0.0, "None", "🟢 Within target", true),
+        categoryComparisons = emptyList(),
+        trendInsights = emptyList(),
+        moneyLeakInsight = null,
+        recurringInsights = emptyList(),
+        unusualTransactions = emptyList()
+    ),
     val allTimeIncome: Double = 0.0,
     val allTimeExpense: Double = 0.0,
     val netBalance: Double = 0.0,
     val averageDailySpend: Double = 0.0,
     
+    // Savings Goals
+    val goals: List<SavingsGoalEntity> = emptyList(),
+    
+    // Phase 7 Security
+    val isAppLocked: Boolean = false,
+
     // UI Filters
     val searchQuery: String = "",
     val selectedTypeFilter: String = "ALL", // "ALL", "EXPENSE", "INCOME"
@@ -85,11 +116,69 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         val database = KeshioDatabase.getDatabase(application)
-        repository = KeshioRepository(database.transactionDao(), database.userSettingsDao())
+        repository = KeshioRepository(database.transactionDao(), database.userSettingsDao(), database.savingsGoalDao())
         smartBudgetManager = com.example.notification.SmartBudgetManager.getInstance(application, repository)
         smsEngine = com.example.sms.FinancialSmsEngine.createForRepository(repository, smartBudgetManager)
         viewModelScope.launch {
             repository.initializeDefaultDataIfNeeded()
+        }
+    }
+
+    fun addGoal(name: String, targetAmount: Double, currentAmount: Double, targetDate: Long?) {
+        viewModelScope.launch {
+            repository.insertGoal(
+                SavingsGoalEntity(
+                    name = name,
+                    targetAmount = targetAmount,
+                    currentAmount = currentAmount,
+                    targetDate = targetDate,
+                    isCompleted = currentAmount >= targetAmount
+                )
+            )
+        }
+    }
+
+    fun updateGoal(id: Long, name: String, targetAmount: Double, currentAmount: Double, targetDate: Long?) {
+        viewModelScope.launch {
+            repository.updateGoal(
+                SavingsGoalEntity(
+                    id = id,
+                    name = name,
+                    targetAmount = targetAmount,
+                    currentAmount = currentAmount,
+                    targetDate = targetDate,
+                    isCompleted = currentAmount >= targetAmount
+                )
+            )
+        }
+    }
+
+    fun addMoneyToGoal(goal: SavingsGoalEntity, amountToAdd: Double) {
+        viewModelScope.launch {
+            val newAmount = goal.currentAmount + amountToAdd
+            val updated = goal.copy(
+                currentAmount = newAmount,
+                isCompleted = newAmount >= goal.targetAmount
+            )
+            repository.updateGoal(updated)
+        }
+    }
+
+    fun togglePauseGoal(goal: SavingsGoalEntity) {
+        viewModelScope.launch {
+            repository.updateGoal(goal.copy(isPaused = !goal.isPaused))
+        }
+    }
+
+    fun toggleCompleteGoal(goal: SavingsGoalEntity) {
+        viewModelScope.launch {
+            repository.updateGoal(goal.copy(isCompleted = !goal.isCompleted))
+        }
+    }
+
+    fun deleteGoal(goal: SavingsGoalEntity) {
+        viewModelScope.launch {
+            repository.deleteGoal(goal)
         }
     }
 
@@ -177,19 +266,26 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
         FilterState(search, typeFilter, categoryFilter, timeframe)
     }
 
+    private val _isAppLocked = MutableStateFlow(false)
+    private var lastBackgroundTimestamp: Long = 0L
+
     val uiState: StateFlow<KeshioUiState> = combine(
         repository.allTransactions,
         repository.userSettings,
-        _filterState
-    ) { transactions, settings, filters ->
+        repository.allGoals,
+        _filterState,
+        _isAppLocked
+    ) { transactions, settings, goals, filters, isLocked ->
         val safeSettings = settings ?: UserSettingsEntity()
         calculateUiState(
             transactions = transactions,
             settings = safeSettings,
+            goals = goals,
             searchQuery = filters.search,
             typeFilter = filters.typeFilter,
             categoryFilter = filters.categoryFilter,
-            timeframe = filters.timeframe
+            timeframe = filters.timeframe,
+            isLocked = isLocked
         )
     }.stateIn(
         scope = viewModelScope,
@@ -200,10 +296,12 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
     private fun calculateUiState(
         transactions: List<TransactionEntity>,
         settings: UserSettingsEntity,
+        goals: List<SavingsGoalEntity>,
         searchQuery: String,
         typeFilter: String,
         categoryFilter: String?,
-        timeframe: String
+        timeframe: String,
+        isLocked: Boolean = false
     ): KeshioUiState {
         val now = System.currentTimeMillis()
         val calendar = Calendar.getInstance()
@@ -334,6 +432,12 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
         // Average daily spend calculation for the current month
         val avgDaily = monthSpent / dayOfMonth
 
+        val insightsData = InsightsEngine.calculateInsights(
+            transactions = transactions,
+            settings = settings,
+            timeframe = timeframe
+        )
+
         return KeshioUiState(
             transactions = transactions,
             filteredTransactions = filtered,
@@ -353,14 +457,17 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
             recommendedDailySpending = recommendedDailySpending,
             isMonthlyBudgetExceeded = isMonthlyBudgetExceeded,
             categoryBreakdown = categoryBreakdown,
+            insightsData = insightsData,
             allTimeIncome = allTimeIncome,
             allTimeExpense = allTimeExpense,
             netBalance = allTimeIncome - allTimeExpense,
             averageDailySpend = avgDaily,
+            goals = goals,
             searchQuery = searchQuery,
             selectedTypeFilter = typeFilter,
             selectedCategoryFilter = categoryFilter,
-            insightsTimeframe = timeframe
+            insightsTimeframe = timeframe,
+            isAppLocked = isLocked
         )
     }
 
@@ -469,9 +576,90 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearAllData() {
+    fun clearAllTransactionsOnly() {
         viewModelScope.launch {
-            repository.deleteAllTransactions()
+            repository.clearAllTransactionsOnly()
+        }
+    }
+
+    fun deleteAllKeshioData() {
+        viewModelScope.launch {
+            repository.deleteAllData()
+        }
+    }
+
+    // App Lock Security Lifecycle & Controls
+    fun lockApp() {
+        val settings = uiState.value.userSettings
+        if (settings.isAppLockEnabled && settings.appLockType != "NONE") {
+            _isAppLocked.value = true
+        }
+    }
+
+    fun unlockApp() {
+        _isAppLocked.value = false
+    }
+
+    fun onAppBackgrounded() {
+        lastBackgroundTimestamp = System.currentTimeMillis()
+        val settings = uiState.value.userSettings
+        if (settings.isAppLockEnabled && settings.appLockType != "NONE") {
+            if (settings.appLockTiming == "IMMEDIATE") {
+                _isAppLocked.value = true
+            }
+        }
+    }
+
+    fun onAppResumed() {
+        val settings = uiState.value.userSettings
+        if (settings.isAppLockEnabled && settings.appLockType != "NONE") {
+            val elapsedMs = System.currentTimeMillis() - lastBackgroundTimestamp
+            when (settings.appLockTiming) {
+                "IMMEDIATE" -> _isAppLocked.value = true
+                "FOREGROUND" -> if (elapsedMs > 1500) _isAppLocked.value = true
+                "ONE_MIN" -> if (elapsedMs > 60_000) _isAppLocked.value = true
+                "FIVE_MIN" -> if (elapsedMs > 300_000) _isAppLocked.value = true
+                else -> if (elapsedMs > 1500) _isAppLocked.value = true
+            }
+        }
+    }
+
+    fun completeOnboarding(
+        dailyTarget: Double,
+        monthlyTarget: Double,
+        appLockType: String,
+        pinInput: String,
+        smsGranted: Boolean
+    ) {
+        viewModelScope.launch {
+            repository.updateDailyTarget(dailyTarget)
+            repository.updateMonthlyTarget(monthlyTarget)
+            repository.updateSmsTracking(smsGranted)
+            if (appLockType != "NONE") {
+                val hashedPin = com.example.security.SecurityUtils.hashPin(pinInput)
+                repository.updateAppLock(enabled = true, lockType = appLockType, pinHash = hashedPin, timing = "FOREGROUND")
+            } else {
+                repository.updateAppLock(enabled = false, lockType = "NONE", pinHash = "", timing = "FOREGROUND")
+            }
+            repository.updateOnboardingCompleted(true)
+        }
+    }
+
+    fun updateAppLock(
+        enabled: Boolean,
+        lockType: String,
+        pin: String,
+        timing: String
+    ) {
+        viewModelScope.launch {
+            val hashedPin = if (pin.isNotBlank()) com.example.security.SecurityUtils.hashPin(pin) else ""
+            repository.updateAppLock(enabled, lockType, hashedPin, timing)
+        }
+    }
+
+    fun updateDetailedNotifications(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateDetailedNotifications(enabled)
         }
     }
 }

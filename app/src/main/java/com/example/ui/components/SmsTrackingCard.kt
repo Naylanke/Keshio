@@ -62,6 +62,7 @@ fun SmsTrackingCard(
 ) {
     val context = LocalContext.current
     var permissionDeniedMessage by remember { mutableStateOf<String?>(null) }
+    var showRationaleDialog by remember { mutableStateOf(false) }
 
     val hasReceiveSmsPermission = ContextCompat.checkSelfPermission(
         context,
@@ -79,6 +80,48 @@ fun SmsTrackingCard(
             permissionDeniedMessage = "SMS permission was not granted. Keshio continues working normally with manual transactions."
             onTrackingToggled(false)
         }
+    }
+
+    if (showRationaleDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRationaleDialog = false },
+            title = {
+                Text(
+                    text = "Why does Keshio need SMS access?",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = "Keshio uses supported financial transaction messages to automatically track your spending. It does not need access to your contacts, calls, microphone, camera or location.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showRationaleDialog = false
+                        permissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.RECEIVE_SMS,
+                                Manifest.permission.READ_SMS
+                            )
+                        )
+                    },
+                    modifier = Modifier.testTag("continue_sms_permission_btn")
+                ) {
+                    Text("Continue", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showRationaleDialog = false }
+                ) {
+                    Text("Not Now")
+                }
+            }
+        )
     }
 
     Card(
@@ -193,12 +236,7 @@ fun SmsTrackingCard(
                 Button(
                     onClick = {
                         if (!hasReceiveSmsPermission) {
-                            permissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.RECEIVE_SMS,
-                                    Manifest.permission.READ_SMS
-                                )
-                            )
+                            showRationaleDialog = true
                         } else {
                             onTrackingToggled(true)
                         }

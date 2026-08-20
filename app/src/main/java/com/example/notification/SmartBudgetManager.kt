@@ -87,7 +87,8 @@ class SmartBudgetManager(
                 todaySpent = todaySpent,
                 dailyTarget = dailyTarget,
                 remainingAmount = dailyRemaining,
-                currencySymbol = currency
+                currencySymbol = currency,
+                isDetailed = settings.detailedNotificationsEnabled
             )
         }
 

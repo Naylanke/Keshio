@@ -48,6 +48,10 @@ object DateTimeUtils {
         }
     }
 
+    fun formatDate(timestamp: Long): String {
+        return dateFormat.format(Date(timestamp))
+    }
+
     fun formatCurrency(amount: Double, symbol: String = "$"): String {
         return "$symbol%,.2f".format(Locale.US, amount)
     }

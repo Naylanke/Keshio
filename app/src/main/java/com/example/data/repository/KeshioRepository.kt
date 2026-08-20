@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import com.example.data.local.SavingsGoalDao
+import com.example.data.local.SavingsGoalEntity
 import com.example.data.local.TransactionDao
 import com.example.data.local.TransactionEntity
 import com.example.data.local.UserSettingsDao
@@ -10,10 +12,30 @@ import java.util.Calendar
 
 class KeshioRepository(
     private val transactionDao: TransactionDao,
-    private val userSettingsDao: UserSettingsDao
+    private val userSettingsDao: UserSettingsDao,
+    private val savingsGoalDao: SavingsGoalDao
 ) {
     val allTransactions: Flow<List<TransactionEntity>> = transactionDao.getAllTransactions()
     val userSettings: Flow<UserSettingsEntity?> = userSettingsDao.getUserSettings()
+    val allGoals: Flow<List<SavingsGoalEntity>> = savingsGoalDao.getAllGoals()
+    val activeGoals: Flow<List<SavingsGoalEntity>> = savingsGoalDao.getActiveGoals()
+
+    suspend fun insertGoal(goal: SavingsGoalEntity): Long {
+        return savingsGoalDao.insertGoal(goal)
+    }
+
+    suspend fun updateGoal(goal: SavingsGoalEntity) {
+        savingsGoalDao.updateGoal(goal)
+    }
+
+    suspend fun deleteGoal(goal: SavingsGoalEntity) {
+        savingsGoalDao.deleteGoal(goal)
+    }
+
+    suspend fun addMoneyToGoal(goalId: Long, amount: Double) {
+        val all = savingsGoalDao.getGoalCount()
+        // We can retrieve active goals and update
+    }
 
     suspend fun insertTransaction(transaction: TransactionEntity): Long {
         return transactionDao.insertTransaction(transaction)
@@ -112,26 +134,104 @@ class KeshioRepository(
                 monthlyTarget = 45000.0,
                 currencySymbol = "KSh",
                 themeMode = "SYSTEM",
-                sampleDataInitialized = false,
+                sampleDataInitialized = true,
                 smsTrackingEnabled = false,
                 testModeEnabled = false,
                 budgetWarningsEnabled = true,
                 transactionNotificationsEnabled = true,
-                endOfDaySummaryEnabled = true
+                endOfDaySummaryEnabled = true,
+                detailedNotificationsEnabled = false,
+                isAppLockEnabled = false,
+                appLockType = "NONE",
+                pinHash = "",
+                appLockTiming = "FOREGROUND",
+                onboardingCompleted = false
             )
             userSettingsDao.insertOrUpdateSettings(settings)
         }
+    }
 
-        val count = transactionDao.getTransactionCount()
-        if (count == 0 && !settings.sampleDataInitialized) {
-            seedSampleTransactions()
-            userSettingsDao.insertOrUpdateSettings(settings.copy(sampleDataInitialized = true))
-        }
+    suspend fun updateDetailedNotifications(enabled: Boolean) {
+        val current = userSettingsDao.getUserSettingsDirect() ?: UserSettingsEntity()
+        userSettingsDao.insertOrUpdateSettings(current.copy(detailedNotificationsEnabled = enabled))
+    }
+
+    suspend fun updateAppLock(
+        enabled: Boolean,
+        lockType: String,
+        pinHash: String = "",
+        timing: String = "FOREGROUND"
+    ) {
+        val current = userSettingsDao.getUserSettingsDirect() ?: UserSettingsEntity()
+        userSettingsDao.insertOrUpdateSettings(
+            current.copy(
+                isAppLockEnabled = enabled,
+                appLockType = lockType,
+                pinHash = if (pinHash.isNotBlank()) pinHash else current.pinHash,
+                appLockTiming = timing
+            )
+        )
+    }
+
+    suspend fun updateOnboardingCompleted(completed: Boolean) {
+        val current = userSettingsDao.getUserSettingsDirect() ?: UserSettingsEntity()
+        userSettingsDao.insertOrUpdateSettings(current.copy(onboardingCompleted = completed))
+    }
+
+    suspend fun clearAllTransactionsOnly() {
+        transactionDao.deleteAllTransactions()
+    }
+
+    suspend fun deleteAllData() {
+        transactionDao.deleteAllTransactions()
+        savingsGoalDao.deleteAllGoals()
+        val freshSettings = UserSettingsEntity(
+            id = 1,
+            dailyTarget = 1500.0,
+            monthlyTarget = 45000.0,
+            currencySymbol = "KSh",
+            themeMode = "SYSTEM",
+            sampleDataInitialized = true,
+            smsTrackingEnabled = false,
+            testModeEnabled = false,
+            budgetWarningsEnabled = true,
+            transactionNotificationsEnabled = true,
+            endOfDaySummaryEnabled = true
+        )
+        userSettingsDao.insertOrUpdateSettings(freshSettings)
     }
 
     suspend fun restoreSampleData() {
         transactionDao.deleteAllTransactions()
+        savingsGoalDao.deleteAllGoals()
         seedSampleTransactions()
+        seedSampleGoals()
+    }
+
+    private suspend fun seedSampleGoals() {
+        val now = System.currentTimeMillis()
+        val sixtyDaysMillis = 60L * 24 * 60 * 60 * 1000
+        val oneHundredTwentyDaysMillis = 120L * 24 * 60 * 60 * 1000
+
+        val goals = listOf(
+            SavingsGoalEntity(
+                name = "New Phone",
+                targetAmount = 30000.0,
+                currentAmount = 8500.0,
+                targetDate = now + sixtyDaysMillis,
+                isPaused = false,
+                isCompleted = false
+            ),
+            SavingsGoalEntity(
+                name = "Emergency Fund",
+                targetAmount = 50000.0,
+                currentAmount = 22000.0,
+                targetDate = now + oneHundredTwentyDaysMillis,
+                isPaused = false,
+                isCompleted = false
+            )
+        )
+        goals.forEach { savingsGoalDao.insertGoal(it) }
     }
 
     private suspend fun seedSampleTransactions() {

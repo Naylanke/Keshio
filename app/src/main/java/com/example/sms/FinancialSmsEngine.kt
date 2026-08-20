@@ -20,7 +20,7 @@ class FinancialSmsEngine(
         fun getInstance(context: Context): FinancialSmsEngine {
             return INSTANCE ?: synchronized(this) {
                 val db = KeshioDatabase.getDatabase(context)
-                val repo = KeshioRepository(db.transactionDao(), db.userSettingsDao())
+                val repo = KeshioRepository(db.transactionDao(), db.userSettingsDao(), db.savingsGoalDao())
                 val budgetManager = com.example.notification.SmartBudgetManager.getInstance(context, repo)
                 val instance = FinancialSmsEngine(repo, budgetManager)
                 INSTANCE = instance

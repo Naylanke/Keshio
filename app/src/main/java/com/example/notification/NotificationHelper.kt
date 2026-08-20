@@ -183,7 +183,8 @@ class NotificationHelper(private val context: Context) {
         todaySpent: Double,
         dailyTarget: Double,
         remainingAmount: Double,
-        currencySymbol: String = "KSh"
+        currencySymbol: String = "KSh",
+        isDetailed: Boolean = false
     ) {
         if (!hasNotificationPermission()) return
 
@@ -192,14 +193,22 @@ class NotificationHelper(private val context: Context) {
         val formattedTarget = DateTimeUtils.formatCurrency(dailyTarget, currencySymbol)
         val formattedRemaining = DateTimeUtils.formatCurrency(remainingAmount, currencySymbol)
 
-        val actionWord = if (type == TransactionType.INCOME) "received from $party" else "spent ($party)"
-        val title = "$formattedAmount $actionWord"
-        val message = "Today's spending: $formattedSpent / $formattedTarget\n$formattedRemaining remaining."
+        val title: String
+        val message: String
+
+        if (isDetailed) {
+            val actionWord = if (type == TransactionType.INCOME) "received from $party" else "spent ($party)"
+            title = "$formattedAmount $actionWord"
+            message = "Today's spending: $formattedSpent / $formattedTarget\n$formattedRemaining remaining."
+        } else {
+            title = "✅ New transaction detected"
+            message = "Keshio updated your spending summary."
+        }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_TRANSACTIONS)
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle(title)
-            .setContentText("Today: $formattedSpent / $formattedTarget • $formattedRemaining remaining")
+            .setContentText(if (isDetailed) "Today: $formattedSpent / $formattedTarget • $formattedRemaining remaining" else "Tap to view spending summary in Keshio")
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)

@@ -43,7 +43,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 }
 
                 if (fullBody.isNotBlank()) {
-                    val repo = KeshioRepository(db.transactionDao(), db.userSettingsDao())
+                    val repo = KeshioRepository(db.transactionDao(), db.userSettingsDao(), db.savingsGoalDao())
                     val engine = FinancialSmsEngine(repo)
                     engine.processAndSaveSms(
                         sender = sender,
