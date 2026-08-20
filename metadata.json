@@ -1,0 +1,6 @@
+{
+  "name": "Keshio",
+  "description": "Privacy-first personal money tracker to know where your money goes with local budgeting, transaction tracking, and spending insights.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
