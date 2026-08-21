@@ -26,7 +26,8 @@ data class ParsedSmsTransaction(
     val rawCategory: SmsTransactionCategory,
     val provider: String,
     val fingerprint: String,
-    val rawMessage: String
+    val rawMessage: String,
+    val phoneNumber: String? = null
 )
 
 sealed class ProcessSmsResult {

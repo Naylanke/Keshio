@@ -188,12 +188,6 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun updateTestMode(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.updateTestMode(enabled)
-        }
-    }
-
     fun updateBudgetWarnings(enabled: Boolean) {
         viewModelScope.launch {
             repository.updateBudgetWarnings(enabled)
@@ -235,10 +229,6 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             smartBudgetManager.testSummaryNotification()
         }
-    }
-
-    fun parseSmsPreview(sender: String?, message: String): com.example.sms.ParsedSmsTransaction? {
-        return smsEngine.parseOnly(sender, message)
     }
 
     fun processAndSaveSms(
@@ -567,12 +557,6 @@ class KeshioViewModel(application: Application) : AndroidViewModel(application) 
     fun updateThemeMode(theme: String) {
         viewModelScope.launch {
             repository.updateThemeMode(theme)
-        }
-    }
-
-    fun restoreSampleData() {
-        viewModelScope.launch {
-            repository.restoreSampleData()
         }
     }
 

@@ -92,7 +92,6 @@ fun KeshioApp(
 
     var currentTab by remember { mutableStateOf(KeshioTab.HOME) }
     var isAddEditSheetOpen by remember { mutableStateOf(false) }
-    var isSmsSimulatorOpen by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
 
     var isAddEditGoalSheetOpen by remember { mutableStateOf(false) }
@@ -179,8 +178,7 @@ fun KeshioApp(
                                     onNavigateToGoals = {
                                         currentTab = KeshioTab.GOALS
                                     },
-                                    onUpdateSmsTracking = { viewModel.updateSmsTracking(it) },
-                                    onOpenSmsSimulator = { isSmsSimulatorOpen = true }
+                                    onUpdateSmsTracking = { viewModel.updateSmsTracking(it) }
                                 )
                             }
 
@@ -245,12 +243,9 @@ fun KeshioApp(
                                     onUpdateCurrency = { viewModel.updateCurrency(it) },
                                     onUpdateThemeMode = { viewModel.updateThemeMode(it) },
                                     onUpdateSmsTracking = { viewModel.updateSmsTracking(it) },
-                                    onUpdateTestMode = { viewModel.updateTestMode(it) },
                                     onUpdateBudgetWarnings = { viewModel.updateBudgetWarnings(it) },
                                     onUpdateTransactionNotifications = { viewModel.updateTransactionNotifications(it) },
                                     onUpdateEndOfDaySummary = { viewModel.updateEndOfDaySummary(it) },
-                                    onOpenSmsSimulator = { isSmsSimulatorOpen = true },
-                                    onRestoreSampleData = { viewModel.restoreSampleData() },
                                     onClearAllData = { viewModel.clearAllTransactionsOnly() },
                                     onDeleteAllKeshioData = { viewModel.deleteAllKeshioData() },
                                     onUpdateDetailedNotifications = { viewModel.updateDetailedNotifications(it) },
@@ -260,20 +255,6 @@ fun KeshioApp(
                                 )
                             }
                         }
-                    }
-
-                    if (isSmsSimulatorOpen) {
-                        com.example.ui.components.SmsSimulatorBottomSheet(
-                            onDismiss = { isSmsSimulatorOpen = false },
-                            testModeEnabled = uiState.userSettings.testModeEnabled,
-                            onTestModeToggled = { viewModel.updateTestMode(it) },
-                            onParsePreview = { sender, message ->
-                                viewModel.parseSmsPreview(sender, message)
-                            },
-                            onProcessSms = { sender, message, isSim, onResult ->
-                                viewModel.processAndSaveSms(sender, message, isSim, onResult)
-                            }
-                        )
                     }
 
                     if (isAddEditSheetOpen) {

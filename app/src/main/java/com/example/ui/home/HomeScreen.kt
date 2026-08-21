@@ -62,7 +62,6 @@ fun HomeScreen(
     onNavigateToTransactions: () -> Unit,
     onNavigateToGoals: () -> Unit = {},
     onUpdateSmsTracking: (Boolean) -> Unit = {},
-    onOpenSmsSimulator: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val currency = uiState.userSettings.currencySymbol
@@ -329,8 +328,7 @@ fun HomeScreen(
             ) {
                 com.example.ui.components.SmsTrackingCard(
                     isTrackingEnabled = uiState.userSettings.smsTrackingEnabled,
-                    onTrackingToggled = onUpdateSmsTracking,
-                    onOpenTestSimulator = onOpenSmsSimulator
+                    onTrackingToggled = onUpdateSmsTracking
                 )
             }
         }

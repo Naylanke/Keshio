@@ -99,6 +99,9 @@ class FinancialSmsEngine(
         if (!parsed.referenceId.isNullOrBlank()) {
             noteParts.add("Ref: ${parsed.referenceId}")
         }
+        if (!parsed.phoneNumber.isNullOrBlank()) {
+            noteParts.add("Phone: ${parsed.phoneNumber}")
+        }
         if (parsed.balanceAfter != null) {
             noteParts.add("Bal: KSh ${"%,.2f".format(parsed.balanceAfter)}")
         }

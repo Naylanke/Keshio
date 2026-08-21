@@ -74,12 +74,9 @@ fun SettingsScreen(
     onUpdateCurrency: (String) -> Unit,
     onUpdateThemeMode: (String) -> Unit,
     onUpdateSmsTracking: (Boolean) -> Unit,
-    onUpdateTestMode: (Boolean) -> Unit,
     onUpdateBudgetWarnings: (Boolean) -> Unit,
     onUpdateTransactionNotifications: (Boolean) -> Unit,
     onUpdateEndOfDaySummary: (Boolean) -> Unit,
-    onOpenSmsSimulator: () -> Unit,
-    onRestoreSampleData: () -> Unit,
     onClearAllData: () -> Unit,
     onDeleteAllKeshioData: () -> Unit = onClearAllData,
     onUpdateDetailedNotifications: (Boolean) -> Unit = {},
@@ -94,7 +91,6 @@ fun SettingsScreen(
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showClearDataDialog by remember { mutableStateOf(false) }
     var showDeleteAllKeshioDialog by remember { mutableStateOf(false) }
-    var showRestoreSampleDialog by remember { mutableStateOf(false) }
     var showAppLockDialog by remember { mutableStateOf(false) }
     var showSetPinDialog by remember { mutableStateOf(false) }
 
@@ -277,31 +273,6 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteAllKeshioDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Restore Sample Data Confirmation Dialog
-    if (showRestoreSampleDialog) {
-        AlertDialog(
-            onDismissRequest = { showRestoreSampleDialog = false },
-            title = { Text("Restore Sample Transactions?") },
-            text = { Text("This will replace current transactions with realistic sample financial data for testing.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onRestoreSampleData()
-                        showRestoreSampleDialog = false
-                    },
-                    modifier = Modifier.testTag("confirm_restore_sample_btn")
-                ) {
-                    Text("Restore", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRestoreSampleDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -599,8 +570,7 @@ fun SettingsScreen(
             ) {
                 com.example.ui.components.SmsTrackingCard(
                     isTrackingEnabled = uiState.userSettings.smsTrackingEnabled,
-                    onTrackingToggled = { onUpdateSmsTracking(it) },
-                    onOpenTestSimulator = onOpenSmsSimulator
+                    onTrackingToggled = { onUpdateSmsTracking(it) }
                 )
             }
         }
@@ -791,16 +761,6 @@ fun SettingsScreen(
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-
-                    SettingItem(
-                        icon = Icons.Default.Refresh,
-                        title = "Restore Sample Transactions",
-                        subtitle = "Populate realistic sample spending and income records",
-                        onClick = { showRestoreSampleDialog = true },
-                        testTag = "setting_restore_sample"
-                    )
-
-                    SettingDivider()
 
                     SettingItem(
                         icon = Icons.Default.DeleteSweep,

@@ -1,14 +1,12 @@
 package com.example.ui.components
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,15 +20,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sms
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,9 +39,11 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,50 +54,202 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.security.SmsPermissionUtils
+import com.example.sms.SmsHistoryImporter
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.IncomeGreen
+import kotlinx.coroutines.launch
 
 @Composable
 fun SmsTrackingCard(
     isTrackingEnabled: Boolean,
     onTrackingToggled: (Boolean) -> Unit,
-    onOpenTestSimulator: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     var permissionDeniedMessage by remember { mutableStateOf<String?>(null) }
     var isPermanentlyDenied by remember { mutableStateOf(false) }
     var showRationaleDialog by remember { mutableStateOf(false) }
 
-    val hasSmsPermission = SmsPermissionUtils.hasAnySmsPermission(context)
+    var isCheckingOrRequesting by remember { mutableStateOf(false) }
+    var isImportingHistory by remember { mutableStateOf(false) }
+    var importResultMessage by remember { mutableStateOf<String?>(null) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val receiveGranted = permissions[Manifest.permission.RECEIVE_SMS] == true
-        val readGranted = permissions[Manifest.permission.READ_SMS] == true
-        Log.d("KeshioSmsPermission", "Permission result callback received: RECEIVE_SMS=$receiveGranted, READ_SMS=$readGranted")
+    var hasReceiveSms by remember { mutableStateOf(SmsPermissionUtils.hasReceiveSmsPermission(context)) }
+    var hasReadSms by remember { mutableStateOf(SmsPermissionUtils.hasReadSmsPermission(context)) }
 
-        if (receiveGranted || readGranted) {
+    // Re-check permissions automatically when user resumes activity (e.g. returning from Android Settings)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val receivePermissionNow = SmsPermissionUtils.hasReceiveSmsPermission(context)
+                val readPermissionNow = SmsPermissionUtils.hasReadSmsPermission(context)
+                hasReceiveSms = receivePermissionNow
+                hasReadSms = readPermissionNow
+                Log.d("KeshioSmsTracking", "Activity ON_RESUME permission re-check: RECEIVE_SMS=$receivePermissionNow, READ_SMS=$readPermissionNow")
+
+                if (receivePermissionNow) {
+                    permissionDeniedMessage = null
+                    isPermanentlyDenied = false
+                    isCheckingOrRequesting = false
+                    if (!isTrackingEnabled) {
+                        Log.d("KeshioSmsTracking", "Permission granted on resume. Enabling automatic SMS detection.")
+                        onTrackingToggled(true)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Separate launcher for RECEIVE_SMS (Automatic detection of NEW SMS)
+    val receiveSmsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        isCheckingOrRequesting = false
+        Log.d("KeshioSmsTracking", "RECEIVE_SMS permission callback result: $isGranted")
+        hasReceiveSms = SmsPermissionUtils.hasReceiveSmsPermission(context)
+        if (isGranted) {
             permissionDeniedMessage = null
             isPermanentlyDenied = false
             onTrackingToggled(true)
+            Log.d("KeshioSmsTracking", "RECEIVE_SMS permission granted! Automatic detection enabled.")
         } else {
-            val permanentlyDenied = !SmsPermissionUtils.shouldShowRationale(context)
+            val permanentlyDenied = !SmsPermissionUtils.shouldShowReceiveSmsRationale(context)
             isPermanentlyDenied = permanentlyDenied
             permissionDeniedMessage = if (permanentlyDenied) {
-                "SMS permission was disabled. You can enable it in Android Settings to auto-track transactions."
+                "RECEIVE_SMS permission was disabled. Tap 'Open App Settings' below to allow SMS access for automatic tracking."
             } else {
-                "SMS permission was not granted. Keshio continues working normally with manual transactions."
+                "RECEIVE_SMS permission was denied. Keshio will continue with manual transaction tracking."
             }
             onTrackingToggled(false)
+            Log.w("KeshioSmsTracking", "RECEIVE_SMS permission denied. permanentlyDenied=$permanentlyDenied")
+        }
+    }
+
+    // Separate launcher for READ_SMS (Scanning EXISTING SMS history)
+    val readSmsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        Log.d("KeshioSmsTracking", "READ_SMS permission callback result: $isGranted")
+        hasReadSms = SmsPermissionUtils.hasReadSmsPermission(context)
+        if (isGranted) {
+            isImportingHistory = true
+            scope.launch {
+                try {
+                    val result = SmsHistoryImporter.importSmsHistory(context)
+                    importResultMessage = if (result.errorMessage != null) {
+                        result.errorMessage
+                    } else {
+                        "Import finished: ${result.importedCount} new transactions added (${result.duplicateCount} duplicates skipped)."
+                    }
+                } catch (e: Exception) {
+                    Log.e("KeshioSmsTracking", "Error during SMS history import", e)
+                    importResultMessage = "Error importing SMS history: ${e.message}"
+                } finally {
+                    isImportingHistory = false
+                }
+            }
+        } else {
+            importResultMessage = "READ_SMS permission is required to scan past inbox messages."
+        }
+    }
+
+    fun requestReceiveSms() {
+        Log.d("KeshioSmsTracking", "requestReceiveSms initiated...")
+        isCheckingOrRequesting = true
+        permissionDeniedMessage = null
+
+        try {
+            if (!SmsPermissionUtils.isTelephonySupported(context)) {
+                isCheckingOrRequesting = false
+                permissionDeniedMessage = "SMS features are unavailable on this device."
+                Log.w("KeshioSmsTracking", "Telephony hardware not supported on device.")
+                return
+            }
+
+            if (SmsPermissionUtils.hasReceiveSmsPermission(context)) {
+                isCheckingOrRequesting = false
+                hasReceiveSms = true
+                onTrackingToggled(true)
+                Log.d("KeshioSmsTracking", "RECEIVE_SMS already granted. Tracking enabled.")
+                return
+            }
+
+            if (SmsPermissionUtils.shouldShowReceiveSmsRationale(context)) {
+                isCheckingOrRequesting = false
+                showRationaleDialog = true
+                Log.d("KeshioSmsTracking", "Showing rationale dialog before permission request.")
+                return
+            }
+
+            Log.d("KeshioSmsTracking", "Launching RECEIVE_SMS permission prompt...")
+            SmsPermissionUtils.safeLaunchSinglePermissionRequest(
+                launcher = receiveSmsLauncher,
+                permission = Manifest.permission.RECEIVE_SMS,
+                context = context,
+                onError = { error ->
+                    isCheckingOrRequesting = false
+                    permissionDeniedMessage = error
+                    onTrackingToggled(false)
+                    Log.e("KeshioSmsTracking", "Error launching RECEIVE_SMS request: $error")
+                }
+            )
+        } catch (e: Exception) {
+            isCheckingOrRequesting = false
+            permissionDeniedMessage = "Unable to request SMS permission: ${e.localizedMessage}"
+            Log.e("KeshioSmsTracking", "Unexpected exception in requestReceiveSms", e)
+        }
+    }
+
+    fun startSmsHistoryImport() {
+        Log.d("KeshioSmsTracking", "startSmsHistoryImport initiated...")
+        if (SmsPermissionUtils.hasReadSmsPermission(context)) {
+            hasReadSms = true
+            isImportingHistory = true
+            scope.launch {
+                try {
+                    val result = SmsHistoryImporter.importSmsHistory(context)
+                    importResultMessage = if (result.errorMessage != null) {
+                        result.errorMessage
+                    } else {
+                        "Import finished: ${result.importedCount} new transactions added (${result.duplicateCount} duplicates skipped)."
+                    }
+                } catch (e: Exception) {
+                    Log.e("KeshioSmsTracking", "Error during SMS history import", e)
+                    importResultMessage = "Error importing SMS history: ${e.message}"
+                } finally {
+                    isImportingHistory = false
+                }
+            }
+        } else {
+            if (SmsPermissionUtils.shouldShowReadSmsRationale(context)) {
+                importResultMessage = "READ_SMS permission is required to scan past inbox messages."
+            }
+            SmsPermissionUtils.safeLaunchSinglePermissionRequest(
+                launcher = readSmsLauncher,
+                permission = Manifest.permission.READ_SMS,
+                context = context,
+                onError = { error -> importResultMessage = error }
+            )
         }
     }
 
     if (showRationaleDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showRationaleDialog = false },
+        AlertDialog(
+            onDismissRequest = {
+                showRationaleDialog = false
+                isCheckingOrRequesting = false
+            },
             title = {
                 Text(
                     text = "Why does Keshio need SMS access?",
@@ -113,9 +267,13 @@ fun SmsTrackingCard(
                 TextButton(
                     onClick = {
                         showRationaleDialog = false
-                        SmsPermissionUtils.safeLaunchPermissionRequest(
-                            launcher = permissionLauncher,
+                        isCheckingOrRequesting = true
+                        SmsPermissionUtils.safeLaunchSinglePermissionRequest(
+                            launcher = receiveSmsLauncher,
+                            permission = Manifest.permission.RECEIVE_SMS,
+                            context = context,
                             onError = { error ->
+                                isCheckingOrRequesting = false
                                 permissionDeniedMessage = error
                                 onTrackingToggled(false)
                             }
@@ -128,7 +286,10 @@ fun SmsTrackingCard(
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showRationaleDialog = false }
+                    onClick = {
+                        showRationaleDialog = false
+                        isCheckingOrRequesting = false
+                    }
                 ) {
                     Text("Not Now")
                 }
@@ -190,7 +351,7 @@ fun SmsTrackingCard(
                     )
                 }
 
-                if (hasSmsPermission && isTrackingEnabled) {
+                if (hasReceiveSms && isTrackingEnabled) {
                     Switch(
                         checked = isTrackingEnabled,
                         onCheckedChange = { onTrackingToggled(it) },
@@ -207,7 +368,7 @@ fun SmsTrackingCard(
 
             // Explanatory body text
             Text(
-                text = "Keshio can detect supported financial transaction messages and turn them into spending records.",
+                text = "Keshio can detect supported incoming financial transaction messages and automatically record them into your budget.",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     lineHeight = 20.sp
                 ),
@@ -233,7 +394,7 @@ fun SmsTrackingCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "100% On-Device & Private. Messages are never sent to any server.",
+                    text = "100% On-Device & Private. Messages are never uploaded to any server.",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
@@ -242,12 +403,13 @@ fun SmsTrackingCard(
                 )
             }
 
-            if (!hasSmsPermission || !isTrackingEnabled) {
+            if (!hasReceiveSms || !isTrackingEnabled) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 if (isPermanentlyDenied) {
                     Button(
                         onClick = {
+                            Log.d("KeshioSmsTracking", "Opening App Settings due to permanent denial...")
                             SmsPermissionUtils.openAppSettings(context)
                         },
                         modifier = Modifier
@@ -266,31 +428,14 @@ fun SmsTrackingCard(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Open Settings to Grant SMS Permission",
+                            text = "Open App Settings",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                         )
                     }
                 } else {
                     Button(
-                        onClick = {
-                            if (!hasSmsPermission) {
-                                if (!SmsPermissionUtils.isTelephonySupported(context)) {
-                                    permissionDeniedMessage = "SMS features are unavailable on this device. You can use manual entries or the SMS Simulator."
-                                } else if (SmsPermissionUtils.shouldShowRationale(context)) {
-                                    showRationaleDialog = true
-                                } else {
-                                    SmsPermissionUtils.safeLaunchPermissionRequest(
-                                        launcher = permissionLauncher,
-                                        onError = { error ->
-                                            permissionDeniedMessage = error
-                                            onTrackingToggled(false)
-                                        }
-                                    )
-                                }
-                            } else {
-                                onTrackingToggled(true)
-                            }
-                        },
+                        onClick = { requestReceiveSms() },
+                        enabled = !isCheckingOrRequesting,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(46.dp)
@@ -300,16 +445,29 @@ fun SmsTrackingCard(
                             containerColor = EmeraldPrimary
                         )
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Enable Automatic SMS Detection",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                        )
+                        if (isCheckingOrRequesting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Checking Permission...",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Enable Automatic SMS Detection",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
                     }
                 }
             } else {
@@ -325,7 +483,7 @@ fun SmsTrackingCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Active & listening for M-Pesa transactions",
+                        text = "Active & monitoring incoming M-Pesa transactions",
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -334,29 +492,43 @@ fun SmsTrackingCard(
                 }
             }
 
-            // Developer / Test Mode Simulator button
+            // SMS History Import Action
             Spacer(modifier = Modifier.height(12.dp))
             OutlinedButton(
-                onClick = onOpenTestSimulator,
+                onClick = { startSmsHistoryImport() },
+                enabled = !isImportingHistory,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(42.dp)
-                    .testTag("open_sms_simulator_btn"),
+                    .testTag("import_sms_history_btn"),
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Developer & Test SMS Simulator",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (isImportingHistory) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Scanning Inbox...",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (hasReadSms) "Scan & Import Past SMS History" else "Import SMS History (Requires READ_SMS)",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             // Permission denied feedback
@@ -381,6 +553,30 @@ fun SmsTrackingCard(
                     )
                 }
             }
+
+            // Import status feedback
+            AnimatedVisibility(visible = importResultMessage != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = importResultMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }
+

@@ -27,6 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.security.SecurityUtils
 import com.example.security.SmsPermissionUtils
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
 fun OnboardingScreen(
@@ -34,6 +37,7 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var currentStep by remember { mutableStateOf(1) }
 
     // State for configuration
@@ -48,34 +52,51 @@ fun OnboardingScreen(
     val isBiometricSupported = remember(context) { SecurityUtils.canAuthenticateWithBiometrics(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val receiveGranted = permissions[Manifest.permission.RECEIVE_SMS] == true
-        val readGranted = permissions[Manifest.permission.READ_SMS] == true
-        Log.d("KeshioSmsPermission", "Onboarding permission result callback: RECEIVE_SMS=$receiveGranted, READ_SMS=$readGranted")
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        Log.d("KeshioSmsPermission", "Onboarding RECEIVE_SMS permission result: $isGranted")
 
-        if (receiveGranted || readGranted) {
+        if (isGranted) {
             isSmsGranted = true
             permissionErrorMessage = null
             isPermanentlyDenied = false
         } else {
-            val permanentlyDenied = !SmsPermissionUtils.shouldShowRationale(context)
+            val permanentlyDenied = !SmsPermissionUtils.shouldShowReceiveSmsRationale(context)
             isPermanentlyDenied = permanentlyDenied
             isSmsGranted = false
             permissionErrorMessage = if (permanentlyDenied) {
-                "SMS permission was disabled in system settings. You can grant access in Settings or continue manually."
+                "RECEIVE_SMS permission was disabled. Grant access in Settings (or App Info > Allow restricted settings) to enable auto-tracking."
             } else {
-                "SMS permission was not granted. Keshio continues working normally with manual transactions."
+                "RECEIVE_SMS permission was not granted. Keshio continues working normally with manual transactions."
             }
         }
     }
 
-    val hasSmsPermission = SmsPermissionUtils.hasAnySmsPermission(context)
+    val hasSmsPermission = SmsPermissionUtils.hasReceiveSmsPermission(context)
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val hasPermissionNow = SmsPermissionUtils.hasReceiveSmsPermission(context)
+                Log.d("KeshioSmsTracking", "Onboarding ON_RESUME permission check: $hasPermissionNow")
+                if (hasPermissionNow) {
+                    isSmsGranted = true
+                    permissionErrorMessage = null
+                    isPermanentlyDenied = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(hasSmsPermission) {
         if (hasSmsPermission) {
             isSmsGranted = true
             permissionErrorMessage = null
+            isPermanentlyDenied = false
         }
     }
 
@@ -539,8 +560,10 @@ fun OnboardingScreen(
                                             if (!SmsPermissionUtils.isTelephonySupported(context)) {
                                                 permissionErrorMessage = "SMS features are unavailable on this device. You can proceed with manual entries."
                                             } else {
-                                                SmsPermissionUtils.safeLaunchPermissionRequest(
+                                                SmsPermissionUtils.safeLaunchSinglePermissionRequest(
                                                     launcher = permissionLauncher,
+                                                    permission = Manifest.permission.RECEIVE_SMS,
+                                                    context = context,
                                                     onError = { error ->
                                                         permissionErrorMessage = error
                                                     }

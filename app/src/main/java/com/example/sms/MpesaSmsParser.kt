@@ -129,7 +129,10 @@ class MpesaSmsParser : FinancialSmsParser {
         // 8. Auto-categorize
         val finalCategory = categorize(detection.party, detection.type, detection.smsCategory, cleanMsg)
 
-        // 9. Generate deterministic fingerprint
+        // 9. Extract phone number if present
+        val phoneNumber = extractPhoneNumber(sender, cleanMsg)
+
+        // 10. Generate deterministic fingerprint
         val fingerprint = generateFingerprint(
             refCode = refCode,
             amount = amount,
@@ -150,8 +153,27 @@ class MpesaSmsParser : FinancialSmsParser {
             rawCategory = detection.smsCategory,
             provider = providerName,
             fingerprint = fingerprint,
-            rawMessage = cleanMsg
+            rawMessage = cleanMsg,
+            phoneNumber = phoneNumber
         )
+    }
+
+    private fun extractPhoneNumber(sender: String?, message: String): String? {
+        val phonePattern = Pattern.compile(
+            "(?:\\+?254|0)([17][0-9]{8})",
+            Pattern.CASE_INSENSITIVE
+        )
+        val msgMatcher = phonePattern.matcher(message)
+        if (msgMatcher.find()) {
+            return msgMatcher.group(0)
+        }
+        if (!sender.isNullOrBlank()) {
+            val senderMatcher = phonePattern.matcher(sender)
+            if (senderMatcher.find()) {
+                return senderMatcher.group(0)
+            }
+        }
+        return null
     }
 
     private data class TypeDetection(
