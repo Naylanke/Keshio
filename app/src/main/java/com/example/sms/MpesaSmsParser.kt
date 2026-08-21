@@ -187,12 +187,10 @@ class MpesaSmsParser : FinancialSmsParser {
         val paybillMatcher = PAYBILL_SENT_PATTERN.matcher(message)
         if (paybillMatcher.find()) {
             val merchant = paybillMatcher.group(2)?.trim().orEmpty()
-            val account = paybillMatcher.group(3)?.trim().orEmpty()
-            val partyName = if (account.isNotBlank()) "$merchant (Acc: $account)" else merchant
             return TypeDetection(
                 type = TransactionType.EXPENSE,
                 smsCategory = SmsTransactionCategory.PAYBILL,
-                party = cleanPartyName(partyName)
+                party = cleanPartyName(merchant)
             )
         }
 
@@ -220,14 +218,13 @@ class MpesaSmsParser : FinancialSmsParser {
 
         // Check Withdrawal
         val withdrawMatcher = WITHDRAW_PATTERN.matcher(message)
-        if (withdrawMatcher.find() || message.contains("Withdraw", ignoreCase = true)) {
-            val agent = if (withdrawMatcher.find()) withdrawMatcher.group(2)?.trim().orEmpty() else ""
+        if (withdrawMatcher.find()) {
+            val agent = withdrawMatcher.group(2)?.trim().orEmpty()
             val cleanAgent = cleanPartyName(agent)
-            val title = if (cleanAgent.isNotBlank()) "Withdrawal - $cleanAgent" else "Cash Withdrawal"
             return TypeDetection(
                 type = TransactionType.EXPENSE,
                 smsCategory = SmsTransactionCategory.WITHDRAWAL,
-                party = title
+                party = cleanAgent.ifBlank { "Cash Withdrawal" }
             )
         }
 
@@ -343,6 +340,7 @@ class MpesaSmsParser : FinancialSmsParser {
             .replace(Regex("\\s+on\\s+[0-9].*$", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\.?\\s*New\\s+M-PESA.*$", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\.?\\s*Transaction\\s+cost.*$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+0[0-9]{9}$"), "")
             .replace(Regex("\\.+$"), "")
             .trim()
     }

@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -35,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +52,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import com.example.security.SmsPermissionUtils
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.IncomeGreen
 
@@ -62,22 +65,30 @@ fun SmsTrackingCard(
 ) {
     val context = LocalContext.current
     var permissionDeniedMessage by remember { mutableStateOf<String?>(null) }
+    var isPermanentlyDenied by remember { mutableStateOf(false) }
     var showRationaleDialog by remember { mutableStateOf(false) }
 
-    val hasReceiveSmsPermission = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.RECEIVE_SMS
-    ) == PackageManager.PERMISSION_GRANTED
+    val hasSmsPermission = SmsPermissionUtils.hasAnySmsPermission(context)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val receiveGranted = permissions[Manifest.permission.RECEIVE_SMS] == true
-        if (receiveGranted) {
+        val readGranted = permissions[Manifest.permission.READ_SMS] == true
+        Log.d("KeshioSmsPermission", "Permission result callback received: RECEIVE_SMS=$receiveGranted, READ_SMS=$readGranted")
+
+        if (receiveGranted || readGranted) {
             permissionDeniedMessage = null
+            isPermanentlyDenied = false
             onTrackingToggled(true)
         } else {
-            permissionDeniedMessage = "SMS permission was not granted. Keshio continues working normally with manual transactions."
+            val permanentlyDenied = !SmsPermissionUtils.shouldShowRationale(context)
+            isPermanentlyDenied = permanentlyDenied
+            permissionDeniedMessage = if (permanentlyDenied) {
+                "SMS permission was disabled. You can enable it in Android Settings to auto-track transactions."
+            } else {
+                "SMS permission was not granted. Keshio continues working normally with manual transactions."
+            }
             onTrackingToggled(false)
         }
     }
@@ -93,20 +104,21 @@ fun SmsTrackingCard(
             },
             text = {
                 Text(
-                    text = "Keshio uses supported financial transaction messages to automatically track your spending. It does not need access to your contacts, calls, microphone, camera or location.",
+                    text = "Keshio parses incoming financial transaction messages (like M-Pesa & bank alerts) to automatically track spending 100% locally on your phone. Non-financial messages are completely ignored.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = {
                         showRationaleDialog = false
-                        permissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.RECEIVE_SMS,
-                                Manifest.permission.READ_SMS
-                            )
+                        SmsPermissionUtils.safeLaunchPermissionRequest(
+                            launcher = permissionLauncher,
+                            onError = { error ->
+                                permissionDeniedMessage = error
+                                onTrackingToggled(false)
+                            }
                         )
                     },
                     modifier = Modifier.testTag("continue_sms_permission_btn")
@@ -115,7 +127,7 @@ fun SmsTrackingCard(
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = { showRationaleDialog = false }
                 ) {
                     Text("Not Now")
@@ -178,7 +190,7 @@ fun SmsTrackingCard(
                     )
                 }
 
-                if (hasReceiveSmsPermission && isTrackingEnabled) {
+                if (hasSmsPermission && isTrackingEnabled) {
                     Switch(
                         checked = isTrackingEnabled,
                         onCheckedChange = { onTrackingToggled(it) },
@@ -230,36 +242,75 @@ fun SmsTrackingCard(
                 )
             }
 
-            if (!hasReceiveSmsPermission || !isTrackingEnabled) {
+            if (!hasSmsPermission || !isTrackingEnabled) {
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Button(
-                    onClick = {
-                        if (!hasReceiveSmsPermission) {
-                            showRationaleDialog = true
-                        } else {
-                            onTrackingToggled(true)
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("enable_sms_detection_btn"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = EmeraldPrimary
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Enable Automatic SMS Detection",
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                    )
+                if (isPermanentlyDenied) {
+                    Button(
+                        onClick = {
+                            SmsPermissionUtils.openAppSettings(context)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("open_app_settings_btn"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Open Settings to Grant SMS Permission",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            if (!hasSmsPermission) {
+                                if (!SmsPermissionUtils.isTelephonySupported(context)) {
+                                    permissionDeniedMessage = "SMS features are unavailable on this device. You can use manual entries or the SMS Simulator."
+                                } else if (SmsPermissionUtils.shouldShowRationale(context)) {
+                                    showRationaleDialog = true
+                                } else {
+                                    SmsPermissionUtils.safeLaunchPermissionRequest(
+                                        launcher = permissionLauncher,
+                                        onError = { error ->
+                                            permissionDeniedMessage = error
+                                            onTrackingToggled(false)
+                                        }
+                                    )
+                                }
+                            } else {
+                                onTrackingToggled(true)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("enable_sms_detection_btn"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldPrimary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Enable Automatic SMS Detection",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
             } else {
                 Spacer(modifier = Modifier.height(12.dp))

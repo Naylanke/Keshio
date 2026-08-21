@@ -32,7 +32,7 @@ class FinancialSmsEngineIntegrationTest {
         database = Room.inMemoryDatabaseBuilder(context, KeshioDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        repository = KeshioRepository(database.transactionDao(), database.userSettingsDao())
+        repository = KeshioRepository(database.transactionDao(), database.userSettingsDao(), database.savingsGoalDao())
         engine = FinancialSmsEngine(repository)
     }
 

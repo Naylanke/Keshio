@@ -1,6 +1,7 @@
 package com.example.ui.onboarding
 
 import android.Manifest
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -24,8 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.example.security.SecurityUtils
+import com.example.security.SmsPermissionUtils
 
 @Composable
 fun OnboardingScreen(
@@ -41,6 +42,8 @@ fun OnboardingScreen(
     var appLockChoice by remember { mutableStateOf("NONE") } // "NONE", "PIN", "BIOMETRIC"
     var pinInput by remember { mutableStateOf("") }
     var isSmsGranted by remember { mutableStateOf(false) }
+    var permissionErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isPermanentlyDenied by remember { mutableStateOf(false) }
 
     val isBiometricSupported = remember(context) { SecurityUtils.canAuthenticateWithBiometrics(context) }
 
@@ -49,16 +52,30 @@ fun OnboardingScreen(
     ) { permissions ->
         val receiveGranted = permissions[Manifest.permission.RECEIVE_SMS] == true
         val readGranted = permissions[Manifest.permission.READ_SMS] == true
-        isSmsGranted = receiveGranted || readGranted
+        Log.d("KeshioSmsPermission", "Onboarding permission result callback: RECEIVE_SMS=$receiveGranted, READ_SMS=$readGranted")
+
+        if (receiveGranted || readGranted) {
+            isSmsGranted = true
+            permissionErrorMessage = null
+            isPermanentlyDenied = false
+        } else {
+            val permanentlyDenied = !SmsPermissionUtils.shouldShowRationale(context)
+            isPermanentlyDenied = permanentlyDenied
+            isSmsGranted = false
+            permissionErrorMessage = if (permanentlyDenied) {
+                "SMS permission was disabled in system settings. You can grant access in Settings or continue manually."
+            } else {
+                "SMS permission was not granted. Keshio continues working normally with manual transactions."
+            }
+        }
     }
 
-    val hasSmsPermission = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.RECEIVE_SMS
-    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    val hasSmsPermission = SmsPermissionUtils.hasAnySmsPermission(context)
 
     LaunchedEffect(hasSmsPermission) {
         if (hasSmsPermission) {
             isSmsGranted = true
+            permissionErrorMessage = null
         }
     }
 
@@ -503,21 +520,62 @@ fun OnboardingScreen(
 
                             if (!isSmsGranted) {
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = {
-                                        permissionLauncher.launch(
-                                            arrayOf(
-                                                Manifest.permission.RECEIVE_SMS,
-                                                Manifest.permission.READ_SMS
-                                            )
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("onboarding_grant_sms_btn")
-                                ) {
-                                    Text("Allow SMS Access")
+                                if (isPermanentlyDenied) {
+                                    Button(
+                                        onClick = {
+                                            SmsPermissionUtils.openAppSettings(context)
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                        modifier = Modifier.testTag("onboarding_open_settings_btn")
+                                    ) {
+                                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Open Settings")
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = {
+                                            if (!SmsPermissionUtils.isTelephonySupported(context)) {
+                                                permissionErrorMessage = "SMS features are unavailable on this device. You can proceed with manual entries."
+                                            } else {
+                                                SmsPermissionUtils.safeLaunchPermissionRequest(
+                                                    launcher = permissionLauncher,
+                                                    onError = { error ->
+                                                        permissionErrorMessage = error
+                                                    }
+                                                )
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.testTag("onboarding_grant_sms_btn")
+                                    ) {
+                                        Text("Allow SMS Access")
+                                    }
                                 }
                             }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = permissionErrorMessage != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = permissionErrorMessage ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
 
